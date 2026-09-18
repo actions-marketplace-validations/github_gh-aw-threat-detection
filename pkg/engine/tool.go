@@ -14,6 +14,12 @@ import (
 // resultSinkPollInterval is how often watchResultSink polls the sink file.
 const resultSinkPollInterval = 250 * time.Millisecond
 
+// BoundResultFileEnvVar carries the detector-owned sink path from the generated
+// wrapper to report-result. Unlike THREAT_DETECTION_RESULT_FILE, it is not an
+// advisory default: report-result gives it precedence over model-controlled
+// command-line arguments.
+const BoundResultFileEnvVar = "THREAT_DETECTION_BOUND_RESULT_FILE"
+
 // reasonsFileName is the conventional name of the reasons file the engine
 // writes. It is provisioned in the same directory as the result sink, which is
 // also the directory holding the rendered prompt file — a directory every
@@ -46,7 +52,7 @@ func provisionResultTool(sinkPath string) (env []string, cleanup func(), err err
 	cleanup = func() { os.RemoveAll(toolDir) }
 
 	wrapperPath := filepath.Join(toolDir, "threat_detection_result")
-	if err := os.WriteFile(wrapperPath, []byte(resultToolScript(self)), 0o700); err != nil {
+	if err := os.WriteFile(wrapperPath, []byte(resultToolScript(self, sinkPath)), 0o700); err != nil {
 		cleanup()
 		return nil, nil, fmt.Errorf("writing result tool wrapper: %w", err)
 	}
@@ -78,8 +84,8 @@ func watchResultSink(ctx context.Context, cancel context.CancelFunc, sinkPath st
 	}
 }
 
-// resultToolScript renders the threat_detection_result wrapper that execs self's
-// report-result subcommand.
+// resultToolScript renders the threat_detection_result wrapper that binds the
+// detector-owned result path and execs self's report-result subcommand.
 //
 // The arguments are forwarded with "$@" (double-quoted, never $* or bare $@) so
 // each argument the engine passed reaches the subcommand as one intact
@@ -88,8 +94,11 @@ func watchResultSink(ctx context.Context, cancel context.CancelFunc, sinkPath st
 // must never re-interpret it. It is only half the boundary, though — the engine
 // composes the command line in its own shell, which is why reason text is
 // transported through --reasons-file rather than as an argument.
-func resultToolScript(self string) string {
-	return "#!/bin/sh\nexec " + shellQuote(self) + " report-result \"$@\"\n"
+func resultToolScript(self, sinkPath string) string {
+	return "#!/bin/sh\n" +
+		"export THREAT_DETECTION_RESULT_FILE=" + shellQuote(sinkPath) + "\n" +
+		"export " + BoundResultFileEnvVar + "=" + shellQuote(sinkPath) + "\n" +
+		"exec " + shellQuote(self) + " report-result \"$@\"\n"
 }
 
 // shellQuote wraps a value in single quotes for safe use in a POSIX shell script.

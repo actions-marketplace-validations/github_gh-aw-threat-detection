@@ -51,7 +51,7 @@ func TestProvisionResultTool(t *testing.T) {
 // attacker-authored content, so the wrapper must use double-quoted "$@" and
 // never re-split or glob what it was given.
 func TestResultToolScriptForwardsArgsIntact(t *testing.T) {
-	script := resultToolScript("/opt/bin/threat detect")
+	script := resultToolScript("/opt/bin/threat detect", "/tmp/result file")
 	if !strings.Contains(script, `"$@"`) {
 		t.Fatalf("wrapper must forward double-quoted \"$@\", got: %q", script)
 	}
@@ -67,7 +67,7 @@ func TestResultToolScriptForwardsArgsIntact(t *testing.T) {
 		t.Fatalf("WriteFile error = %v", err)
 	}
 	wrapper := filepath.Join(dir, "threat_detection_result")
-	if err := os.WriteFile(wrapper, []byte(resultToolScript(echoArgs)), 0o700); err != nil {
+	if err := os.WriteFile(wrapper, []byte(resultToolScript(echoArgs, "/tmp/result.json")), 0o700); err != nil {
 		t.Fatalf("WriteFile error = %v", err)
 	}
 
@@ -79,6 +79,51 @@ func TestResultToolScriptForwardsArgsIntact(t *testing.T) {
 	want := "[report-result]\n[--reasons-file]\n[" + hostile + "]\n"
 	if string(out) != want {
 		t.Fatalf("wrapper mangled arguments:\ngot:  %q\nwant: %q", out, want)
+	}
+}
+
+// TestResultToolScriptBindsResultPath verifies that a nested engine shell
+// cannot drop or redirect the detector-owned sink path.
+func TestResultToolScriptBindsResultPath(t *testing.T) {
+	dir := t.TempDir()
+	echoResultPath := filepath.Join(dir, "echo-result-path")
+	if err := os.WriteFile(echoResultPath, []byte(
+		"#!/bin/sh\nprintf 'result=%s\\nbound=%s\\n' \"$THREAT_DETECTION_RESULT_FILE\" \"$"+BoundResultFileEnvVar+"\"\n",
+	), 0o700); err != nil {
+		t.Fatalf("WriteFile error = %v", err)
+	}
+
+	sink := filepath.Join(dir, "result file.json")
+	wrapper := filepath.Join(dir, "threat_detection_result")
+	if err := os.WriteFile(wrapper, []byte(resultToolScript(echoResultPath, sink)), 0o700); err != nil {
+		t.Fatalf("WriteFile error = %v", err)
+	}
+
+	want := "result=" + sink + "\nbound=" + sink + "\n"
+	for _, tc := range []struct {
+		name string
+		env  []string
+	}{
+		{name: "environment dropped", env: []string{}},
+		{
+			name: "paths redirected",
+			env: []string{
+				"THREAT_DETECTION_RESULT_FILE=/tmp/wrong-result.json",
+				"THREAT_DETECTION_REASONS_FILE=/tmp/wrong-reasons.json",
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cmd := exec.Command(wrapper)
+			cmd.Env = tc.env
+			out, err := cmd.CombinedOutput()
+			if err != nil {
+				t.Fatalf("wrapper error = %v (output: %s)", err, out)
+			}
+			if string(out) != want {
+				t.Fatalf("wrapper did not bind detector-owned paths:\ngot:  %q\nwant: %q", out, want)
+			}
+		})
 	}
 }
 
