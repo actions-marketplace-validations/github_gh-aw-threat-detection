@@ -10,6 +10,11 @@ permissions:
   actions: read
 name: Smoke Codex Standalone
 engine: codex
+models:
+  # Estimated USD per million tokens for models missing from the pricing catalog.
+  default-ai-credits-pricing:
+    input: 5
+    output: 20
 strict: false
 network:
   allowed:
