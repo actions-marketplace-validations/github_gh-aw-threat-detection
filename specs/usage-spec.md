@@ -105,14 +105,11 @@ more strictly than its configured detection-failure policy. In warn mode
 (`GH_AW_DETECTION_CONTINUE_ON_ERROR` other than `"false"`) the host SHOULD retry
 the download, then surface an unrecoverable acquisition failure as a warning
 with the `agent_failure` outcome (per U-20) rather than as a job failure — the
-absent detector is the same non-fatal condition its conclusion step already
-tolerates. To keep this consistent with U-20's exception — which mandates a
-hard-fail for `agent_failure`/`parse_error` whenever the detection *execution*
-step also failed — the host MUST ensure the acquisition failure does not
-propagate as a failed execution outcome: either the execution step is skipped
-(so `DETECTION_AGENTIC_EXECUTION_OUTCOME` is `skipped`, not `failure`), or a
-pre-execution guard short-circuits the run before invoking a missing binary
-(as `conclude_threat_detection.sh` does today for its own missing-binary case).
+absent detector is a tooling failure subject to the configured warning policy,
+with `conclusion=warning`, `reason=agent_failure`, and `success=false`.
+The host SHOULD skip execution when acquisition fails, or use a pre-execution
+guard to avoid invoking a missing binary. The execution outcome is diagnostic
+context and MUST NOT override the configured warn-mode policy (per U-20).
 In strict mode the acquisition failure MUST fail the job, because detection
 cannot run. In either mode the host MUST NOT synthesize a verdict: warn mode
 records the run as a detection failure it chose to tolerate, not as a `safe`
@@ -349,7 +346,7 @@ environment inputs consumed by `conclude`:
 |----------|--------|
 | `RUN_DETECTION` | When not `"true"`, the verdict is `skipped`/`success` |
 | `GH_AW_DETECTION_CONTINUE_ON_ERROR` | Anything other than `"false"` (compared case-insensitively) selects warn mode |
-| `DETECTION_AGENTIC_EXECUTION_OUTCOME` | `"failure"` makes `agent_failure`/`parse_error` hard-fail |
+| `DETECTION_AGENTIC_EXECUTION_OUTCOME` | Provides execution-outcome context; does not override warn or strict mode |
 
 A host MAY also pass `--detection-log <path>` (default `<result-file-dir>/detection.log`)
 so `conclude` can refine a missing-result-file outcome into `agent_failure` or
@@ -359,9 +356,12 @@ so `conclude` can refine a missing-result-file outcome into `agent_failure` or
 reports `agent_failure` or `parse_error` (refined from the detection log per
 TD-20b, defaulting to `agent_failure`), a malformed result file always reports
 `parse_error`, and a detected threat reports `threat_detected`. In warn mode,
-non-mandatory failures MUST surface as warnings without failing the job, except
-that `agent_failure` and `parse_error` MUST hard-fail when the detection execution
-step itself failed (per TD-20b).
+non-mandatory failures MUST surface as warnings without failing the job, including
+`agent_failure` and `parse_error` when the detection execution step itself failed.
+These failures MUST emit `conclusion=warning`, preserve the original `reason`,
+report `success=false`, and exit 0. In strict mode they MUST emit
+`conclusion=failure`, preserve the original `reason`, report `success=false`,
+and exit 1 (per TD-20b).
 
 ### 6.1 Exit codes and status line
 
